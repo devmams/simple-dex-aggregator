@@ -23,30 +23,41 @@ contract Aggregator {
         dexs.push(0x696708Db871B77355d6C2bE7290B27CF0Bb9B24b); //Linkswap
     }
 
-    function getBestRate(address srcToken, address destToken, uint256 amountIn) external view returns(bytes memory result){
+    function getBestRate(address srcToken, address destToken, uint256 amountIn) external view returns(address[] memory, uint256, address[] memory){
         require(srcToken != destToken, "srcToken and destToken must not be the same");
         require(amountIn > 0, "amountIn must be greater than zero");
+
+        address[] memory path0 = new address[](2);
+        path0[0] = srcToken;
+        path0[1] = destToken;
         if((srcToken == ETH && destToken == WETH) || (srcToken == WETH && destToken == ETH)){
-            result = abi.encode([srcToken, destToken], amountIn, [WETH]);
+            address[] memory pair = new address[](1);
+            pair[0] = WETH;
+            return (path0, amountIn, pair);
         }else{
             address _srcToken = srcToken == ETH ? WETH: srcToken;
             address _destToken = destToken == ETH ? WETH: destToken;
 
             // get best rate with 0 connector
-            (bytes memory result0, uint256 amountOut0) = getBestRate0Connector(_srcToken, _destToken, amountIn);
-            result = amountOut0 > 0 ? abi.encode([srcToken, destToken], amountOut0, result0) : abi.encode(ZERO);
+            (address[] memory pairs0, uint256 amountOut0) = getBestRate0Connector(_srcToken, _destToken, amountIn);
 
             // get best rate with 'WETH' connector when srcToken && destToken != WETH
             if(_srcToken != WETH && _destToken != WETH){
-                (bytes memory result1, uint256 amountOut1) = getBestRate1Connector(_srcToken, _destToken, amountIn);
-                result = amountOut1 > amountOut0 ? abi.encode([srcToken, WETH, destToken], amountOut1, result1) : result;
+                (address[] memory pairs1, uint256 amountOut1) = getBestRate1Connector(_srcToken, _destToken, amountIn);
+                address[] memory path1 = new address[](3);
+                path1[0] = srcToken;
+                path1[1] = WETH;
+                path1[2] = destToken;
+                return amountOut1 > amountOut0 ? (path1, amountOut1, pairs1) : (path0, amountOut0, pairs0);
             }
+
+            return (path0, amountOut0, pairs0);
         }
     }
 
-    function getBestRate0Connector(address srcToken, address destToken, uint256 amountIn) internal view returns(bytes memory result, uint256 amountOut){
-        amountOut = 0;
-        address pair;
+    function getBestRate0Connector(address srcToken, address destToken, uint256 amountIn) internal view returns(address[] memory, uint256){
+        uint256 amountOut = 0;
+        address[] memory pairs = new address[](1);
         for(uint i=0; i<dexs.length; i++){
             address _pair = IUniswapV2Factory(dexs[i]).getPair(srcToken, destToken);
             if(_pair != ZERO){
@@ -55,17 +66,16 @@ contract Aggregator {
                 uint256 _amountOut = getAmountOut(amountIn, reserve0, reserve1);
                 if(_amountOut > amountOut){
                     amountOut = _amountOut;
-                    pair = _pair;
+                    pairs[0] = _pair;
                 }
             }
         }
-        result = amountOut > 0 ? abi.encode([pair]) : abi.encode(ZERO);
+        return (pairs, amountOut);
     }
 
-    function getBestRate1Connector(address srcToken, address destToken, uint256 amountIn) internal view returns(bytes memory result, uint256 amountOut){
-        amountOut = 0;
-        address pair0;
-        address pair1;
+    function getBestRate1Connector(address srcToken, address destToken, uint256 amountIn) internal view returns(address[] memory, uint256){
+        uint256 amountOut = 0;
+        address[] memory pairs = new address[](2);
         for(uint i=0; i<dexs.length; i++){
             address _pair0 = IUniswapV2Factory(dexs[i]).getPair(srcToken, WETH);
             address _pair1 = IUniswapV2Factory(dexs[i]).getPair(WETH, destToken);
@@ -77,12 +87,12 @@ contract Aggregator {
                 uint256 _amountOut = getAmountOut(getAmountOut(amountIn, reserve00, reserve01), reserve10, reserve11);
                 if(_amountOut > amountOut){
                     amountOut = _amountOut;
-                    pair0 = _pair0;
-                    pair1 = _pair1;
+                    pairs[0] = _pair0;
+                    pairs[1] = _pair1;
                 }
             }
         }
-        result = amountOut > 0 ? abi.encode([pair0, pair1]) : abi.encode(ZERO);
+        return (pairs, amountOut);
     }
 
     function getAmountOut(uint256 amountIn, uint256 reserveIn, uint256 reserveOut) internal pure returns (uint256 amountOut){
